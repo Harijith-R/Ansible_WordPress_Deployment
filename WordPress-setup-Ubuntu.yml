@@ -1,0 +1,102 @@
+---
+- hosts: webserver
+  become: yes
+  gather_facts: no
+  pre_tasks:
+    - name: 'Installing Dependencies'
+      raw: sudo apt-get -y install python aptitude
+  vars:
+   mysql_root_password: mysqlroot123
+   wordpress_db: wordpress
+   wordpress_user: wpuser
+   wordpress_password: password123
+
+  tasks:
+
+          # Installing full packages, dependencies and requirements:
+          # LAMP
+
+  - name: Upgrade all packages to the latest version
+    apt:
+      name: "*"
+      state: latest
+
+  - name: Installing Complete LAMPStack
+    apt: name={{ item }} state=present
+    with_items:
+    - apache2
+    - php
+    - mysql-server
+    - php-mysqlnd
+    - php-mbstring
+    - python-mysqldb
+
+  - name: Restarting Services and Initialising.
+    service: name={{ item }} state=restarted enabled=yes
+    with_items:
+    - mysql
+    - apache2
+
+
+      # Database creation and configuration:
+      # Creating Necessary User,Database for wordpress
+
+  - name: Creating Wordpress Database.
+    mysql_db: db="{{wordpress_db}}" state=present
+
+  - name: Creating wordpress user.
+    mysql_user: name="{{wordpress_user}}" host=localhost password="{{wordpress_password}}"  priv="{{wordpress_db}}.*:ALL"
+
+  - name: Updating MySql-Root Password.
+    mysql_user: name=root host_all=yes password="{{mysql_root_password}}"
+
+    # Downloading latest WordPress and extracting:
+
+  - name: Downloading Latest WordPress.
+    get_url: url=http://www.wordpress.org/latest.tar.gz  dest=/tmp/wordpress.tar
+
+  - name: Extracting WordPress.
+    unarchive: src=/tmp/wordpress.tar dest=/tmp/  remote_src=yes
+
+  - name: Copying WordPress files to Document root.
+    shell: "cp -r /tmp/wordpress/*  /var/www/html/"
+
+  - name: Initialising the wp-config.php file.
+    copy: src=/var/www/html/wp-config-sample.php  dest=/var/www/html/wp-config.php remote_src=yes
+
+    # Removing extracted WordPress directory and the tar file:
+
+  - name: Removing Wordpress.tar
+    file: path=/tmp/wordpress.tar state=absent
+
+  - name: Removing Wodpress Extracted Directory.
+    file: path=/tmp/wordpress state=absent
+
+  - name: Removing Default Apache2 index file.
+    file: path=/var/www/html/index.html state=absent
+
+    # Correcting the WordPress ownership and updating the wp-config.php:
+
+  - name: Chaning Doc-root permission.
+    shell: 'chown -R www-data:www-data /var/www/html/'
+    args:
+     warn: false
+
+  - name: Update WordPress config file
+    lineinfile:
+      dest: "/var/www/html/wp-config.php"
+      regexp: "{{ item.regexp }}"
+      line: "{{ item.line }}"
+    with_items:
+     - {'regexp': "define\\('DB_NAME', '(.)+'\\);", 'line': "define('DB_NAME', '{{wordpress_db}}');"}
+     - {'regexp': "define\\('DB_USER', '(.)+'\\);", 'line': "define('DB_USER', '{{wordpress_user}}');"}
+     - {'regexp': "define\\('DB_PASSWORD', '(.)+'\\);", 'line': "define('DB_PASSWORD', '{{wordpress_password}}');"}
+
+
+       # Final service restart of essential services:
+
+  - name: Restarting LampStack.
+    service: name={{ item }} state=restarted
+    with_items:
+    - mysql
+    - apache2
